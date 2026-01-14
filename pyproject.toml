@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semantic-image-search-mcp"
+version = "0.1.0"
+description = "MCP server for semantic image search using CLIP and FAISS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Himalayan Trust", email = "info@himalayantrust.org"}
+]
+keywords = ["mcp", "image-search", "clip", "faiss", "semantic-search", "photo-archive"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "mcp>=1.1.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.30.0",
+    "faiss-cpu>=1.7.4",
+    "pillow>=10.0.0",
+    "exifread>=3.0.0",
+    "pyyaml>=6.0.0",
+    "aiosqlite>=0.19.0",
+    "tqdm>=4.65.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+semantic-image-search = "src.server:main"
+
+[project.urls]
+Homepage = "https://github.com/himalayantrust/semantic-image-search-mcp"
+"Bug Tracker" = "https://github.com/himalayantrust/semantic-image-search-mcp/issues"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

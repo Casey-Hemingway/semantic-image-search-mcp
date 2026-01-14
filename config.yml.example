@@ -1,0 +1,49 @@
+# Semantic Image Search MCP Server Configuration
+# Copy this file to config.yml and customize for your photo archive
+
+# Path to your photo archive (required)
+# Can be absolute or relative path, supports ~ for home directory
+archive_path: "/path/to/your/photos"
+
+# Directory for storing index data and metadata (optional)
+# Defaults to ./data if not specified
+data_dir: "./data"
+
+# CLIP model configuration
+clip:
+  # Model to use for image embeddings
+  # Options: "openai/clip-vit-base-patch32" (recommended, fast)
+  #          "openai/clip-vit-large-patch14" (slower, more accurate)
+  model_name: "openai/clip-vit-base-patch32"
+
+  # Device for inference
+  # Options: "auto" (detect best device), "mps" (Apple Silicon), "cuda" (NVIDIA GPU), "cpu"
+  device: "auto"
+
+  # Batch size for processing images
+  # Larger = faster but uses more memory
+  # Recommended: 32 for most systems, 64 for high-memory systems
+  batch_size: 32
+
+# Search configuration
+search:
+  # Default number of results to return
+  default_limit: 10
+
+  # Maximum number of results allowed
+  max_limit: 100
+
+  # Minimum similarity threshold (0.0 = return all, 1.0 = exact match only)
+  # Set to 0.0 to see all results ranked by similarity
+  similarity_threshold: 0.0
+
+# Thumbnail configuration
+thumbnails:
+  # Generate thumbnails during indexing
+  enabled: true
+
+  # Maximum dimension for thumbnails (maintains aspect ratio)
+  max_size: 512
+
+  # JPEG quality for thumbnails (0-100)
+  quality: 85

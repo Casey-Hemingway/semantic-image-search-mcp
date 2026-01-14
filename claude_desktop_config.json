@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "semantic-image-search": {
+      "command": "/Users/casey-hemingway/Documents/Projects/HT/photo-library/start_mcp_server.sh"
+    }
+  }
+}
