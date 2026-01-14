@@ -67,3 +67,15 @@ models/
 # Temporary files
 *.tmp
 *.bak
+
+# Image files (sample/test images should not be committed)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.JPG
+*.JPEG
+*.PNG
