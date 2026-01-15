@@ -1,34 +1,51 @@
 # Claude Desktop Setup Instructions
 
-## Fixed Issues
-✅ Log file path issue resolved (now uses absolute path)
-✅ Python path issue resolved (using correct Python with installed packages)
-✅ Environment variables set correctly (KMP_DUPLICATE_LIB_OK)
+## Prerequisites
+
+### Install uv (Python package manager)
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Initialize the project
+```bash
+cd /path/to/photo-library
+uv sync
+```
 
 ## Setup Steps
 
 ### 1. Locate Claude Desktop Config File
 
 The config file is at:
-```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ### 2. Update the Config
 
-Open the file and add this configuration:
+Open the file and add this configuration (update paths for your system):
 
 ```json
 {
   "mcpServers": {
     "semantic-image-search": {
-      "command": "/Users/casey-hemingway/Documents/Projects/HT/photo-library/start_mcp_server.sh"
+      "command": "/Users/YOUR_USERNAME/.local/bin/uv",
+      "args": [
+        "--directory",
+        "/path/to/photo-library",
+        "run",
+        "python",
+        "run_server.py"
+      ],
+      "env": {
+        "KMP_DUPLICATE_LIB_OK": "TRUE"
+      }
     }
   }
 }
 ```
 
-**Note:** If you already have other MCP servers configured, add the "semantic-image-search" entry to the existing "mcpServers" object.
+**Note:** Replace paths with your actual paths. Use `which uv` to find your uv path.
 
 ### 3. Restart Claude Desktop
 
