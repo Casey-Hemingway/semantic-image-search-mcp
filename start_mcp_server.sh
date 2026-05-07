@@ -1,13 +1,15 @@
 #!/bin/bash
-# MCP Server startup script with correct Python path and environment
+# MCP server entry point. Resolves its own location, so it works wherever the
+# repo lives — no hardcoded paths. Assumes `uv sync` has been run.
 
-# Change to project directory so config.yml can be found
-cd "/Users/casey-hemingway/Documents/Projects/HT/photo-library"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Set environment variables
 export KMP_DUPLICATE_LIB_OK=TRUE
-export PYTHONPATH="/Users/casey-hemingway/Documents/Projects/HT/photo-library"
 
-# Use the Python that has all packages installed
-exec /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
-    "/Users/casey-hemingway/Documents/Projects/HT/photo-library/run_server.py"
+if [ ! -x "$SCRIPT_DIR/.venv/bin/semantic-image-search" ]; then
+    echo "venv missing or incomplete. Run: uv sync" >&2
+    exit 1
+fi
+
+exec "$SCRIPT_DIR/.venv/bin/semantic-image-search"
