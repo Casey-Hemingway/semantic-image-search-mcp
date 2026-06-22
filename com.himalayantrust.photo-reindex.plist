@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: keep the photo-library index current automatically.
+
+  Runs auto_reindex.sh once a day at 02:30. Incremental, so it only embeds
+  new/changed photos and does not re-download the whole library.
+
+  Install:
+    cp com.himalayantrust.photo-reindex.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.himalayantrust.photo-reindex.plist
+
+  Run once now to test:
+    launchctl start com.himalayantrust.photo-reindex
+
+  Check it's loaded:
+    launchctl list | grep photo-reindex
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.himalayantrust.photo-reindex.plist
+    rm ~/Library/LaunchAgents/com.himalayantrust.photo-reindex.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.himalayantrust.photo-reindex</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/casey-hemingway/Code/HimalayanTrust/semantic-image-search-mcp/auto_reindex.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/casey-hemingway/Code/HimalayanTrust/semantic-image-search-mcp/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/casey-hemingway/Code/HimalayanTrust/semantic-image-search-mcp/logs/launchd.err.log</string>
+</dict>
+</plist>

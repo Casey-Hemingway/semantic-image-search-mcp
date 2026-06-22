@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 import time
 import numpy as np
 import torch
@@ -16,7 +17,6 @@ from .metadata import (
     extract_metadata,
     store_image_metadata,
     init_database,
-    compute_file_hash,
 )
 from .utils import (
     get_optimal_device,
@@ -114,11 +114,23 @@ class ImageIndexer:
         self.config = config
         self.embedder: Optional[ClipEmbedder] = None
 
-    async def index_archive(self, force: bool = False) -> dict:
+    async def index_archive(
+        self,
+        force: bool = False,
+        subpath: Optional[Path] = None,
+        rebuild: bool = True,
+    ) -> dict:
         """Index all images in the archive.
 
         Args:
             force: If True, re-index all images. If False, only index new/modified images.
+            subpath: If given, only scan this folder (must live under archive_path).
+                Relative-folder metadata stays rooted at archive_path, so indexing
+                one folder at a time produces identical records to a full scan. This
+                lets a driver index then evict the library folder-by-folder, keeping
+                peak local disk to roughly one folder rather than the whole library.
+            rebuild: If True, rebuild the FAISS index at the end. Set False when
+                indexing many folders in a loop and rebuilding once afterwards.
 
         Returns:
             Dictionary with indexing statistics
@@ -135,8 +147,9 @@ class ImageIndexer:
         await init_database(self.config.db_path)
 
         # Find all images
-        print(f"Scanning archive: {self.config.archive_path}")
-        image_paths = find_images(self.config.archive_path)
+        scan_root = subpath if subpath is not None else self.config.archive_path
+        print(f"Scanning archive: {scan_root}")
+        image_paths = find_images(scan_root)
         print(f"Found {len(image_paths)} images")
 
         if not image_paths:
@@ -184,8 +197,9 @@ class ImageIndexer:
                 pbar.update(len(batch))
 
         # Rebuild FAISS index
-        print("Building FAISS index...")
-        await self._rebuild_faiss_index()
+        if rebuild:
+            print("Building FAISS index...")
+            await self._rebuild_faiss_index()
 
         duration = time.time() - start_time
 
@@ -204,7 +218,18 @@ class ImageIndexer:
         }
 
     async def _filter_unindexed(self, paths: list[Path]) -> list[Path]:
-        """Filter to only new or modified images.
+        """Filter to only new or modified images, WITHOUT reading file contents.
+
+        Change detection uses file size + modification time, both of which are
+        available from the filesystem placeholder metadata of an online-only
+        (OneDrive Files On-Demand) file. This matters a lot: the previous
+        implementation hashed the first 8 KB of every file, and reading even one
+        byte of a placeholder forces the cloud provider to download the whole
+        file. That turned every incremental reindex into a full re-download of
+        the entire library. We now only touch (and therefore download) files
+        that are genuinely new or whose size/mtime changed; the content hash is
+        still computed later, inside extract_metadata, for exactly those files
+        we are about to embed anyway.
 
         Args:
             paths: List of image paths
@@ -212,20 +237,25 @@ class ImageIndexer:
         Returns:
             List of paths that need to be indexed
         """
-        unindexed = []
-
+        # Pull stored size + mtime for everything already indexed, in one query.
+        stored: dict[str, tuple] = {}
         async with aiosqlite.connect(self.config.db_path) as db:
-            for path in paths:
-                file_hash = compute_file_hash(path)
+            async with db.execute(
+                "SELECT filepath, file_size, file_modified FROM images"
+            ) as cursor:
+                async for row in cursor:
+                    stored[row[0]] = (row[1], row[2])
 
-                cursor = await db.execute(
-                    "SELECT file_hash FROM images WHERE filepath = ?", (str(path),)
-                )
-                row = await cursor.fetchone()
-
-                # Index if new file or file has been modified
-                if row is None or row[0] != file_hash:
-                    unindexed.append(path)
+        unindexed = []
+        for path in paths:
+            try:
+                st = path.stat()  # metadata only - does NOT materialise a placeholder
+            except OSError:
+                continue
+            current = (st.st_size, datetime.fromtimestamp(st.st_mtime).isoformat())
+            prev = stored.get(str(path))
+            if prev is None or prev[0] != current[0] or prev[1] != current[1]:
+                unindexed.append(path)
 
         return unindexed
 

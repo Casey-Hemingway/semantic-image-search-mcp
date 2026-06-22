@@ -1,0 +1,34 @@
+# Allow-list for index_library.py — which library folders to index, in order.
+# One folder path per line, relative to the library root. Blank lines and
+# lines starting with # are ignored. Order is the order they get indexed.
+#
+# This is a STARTING POINT based on folder names only. Finalise it against the
+# quantitative map (per-folder counts + sizes) before the real run. Split any
+# folder over ~50 GB into its subfolders so eviction can keep disk in check.
+
+# --- Live, high search value ---
+01 General Images
+02 Fundraising
+03 HT Event Images
+04 HT Programme & Projects
+05 Nepal Trips
+06 Story gathering
+11 Board, Ambassadors, Staff and Patron Photographs
+
+# --- Heritage / archival value ---
+07 Historical Photographs - Founding Years
+08 Historical Photographs - Ed Hillary & Expeditions
+09 Media Coverage
+12 Ed Hillary
+13 Hillary Family
+14 AFN Penboche
+
+# --- Look before committing (likely dumps / dupes; sample-check first) ---
+# Images available for use
+# HT images for Prue
+# Pics relief support from UK trust
+# MD to Sort - Hillary
+# Stills
+
+# --- Excluded from the image index ---
+# 10 Videos                # CLIP indexes stills, not video — separate problem
