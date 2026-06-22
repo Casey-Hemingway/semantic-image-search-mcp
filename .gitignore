@@ -41,7 +41,11 @@ data/
 *.db-wal
 
 # Configuration (contains user paths)
-config.yml
+config*.yml
+
+# Data dirs (originals/indices)
+data-test/
+logs/
 
 # Logs
 *.log

@@ -13,6 +13,10 @@
 # index_library.py instead so eviction keeps peak disk in check.
 set -euo pipefail
 
+# faiss and torch can each pull in their own OpenMP runtime; on macOS that
+# aborts with "OMP: Error #15" unless we allow the duplicate. Harmless here.
+export KMP_DUPLICATE_LIB_OK=TRUE
+
 REPO="/Users/casey-hemingway/Code/HimalayanTrust/semantic-image-search-mcp"
 cd "$REPO"
 mkdir -p "$REPO/logs"
