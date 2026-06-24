@@ -343,8 +343,13 @@ class ImageIndexer:
         dimension = embeddings.shape[1]
         num_vectors = len(embeddings)
 
-        # Use IndexFlatL2 for small datasets, IndexIVFFlat for larger ones
-        if num_vectors < 10000:
+        # Use IndexFlatL2 for small/medium datasets, IndexIVFFlat for very large.
+        # IndexFlatL2 is exact and needs no training; at this dimension it searches
+        # hundreds of thousands of vectors in milliseconds, so it comfortably covers
+        # the whole HT library (~26k images). The IVF path requires a train() step
+        # that hits a faiss/OpenMP segfault on macOS, so only use it when the dataset
+        # is genuinely large enough to justify the approximation.
+        if num_vectors < 200000:
             index = faiss.IndexFlatL2(dimension)
         else:
             # Use IVF for larger datasets

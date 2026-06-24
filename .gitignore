@@ -83,3 +83,6 @@ models/
 *.JPG
 *.JPEG
 *.PNG
+
+# Local triage allow-list (private folder names; keep the .example template public)
+folders.allow.txt
