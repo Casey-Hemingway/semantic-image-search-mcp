@@ -10,6 +10,8 @@ Search your photo archive using natural language with AI-powered semantic unders
 - **Fast Indexing**: Optimized for Apple Silicon (MPS) and NVIDIA GPUs (CUDA)
 - **Claude Integration**: Works natively with Claude Desktop via MCP
 - **Privacy First**: Runs 100% locally - your photos never leave your machine
+- **Cloud-Synced Libraries**: Index "online-only" files (OneDrive Files On-Demand, iCloud Drive, Dropbox) without keeping the whole library on disk - change detection reads placeholder metadata, so reindexing never re-downloads what it already knows
+- **Incremental & Scheduled Reindexing**: Embeds only new or changed photos, with a scheduler agent to keep the index current automatically
 
 ## Quick Start
 
@@ -119,6 +121,49 @@ Show me statistics about my photo archive
 ```
 Reindex my photo archive
 ```
+
+## Indexing Large or Cloud-Synced Libraries
+
+If your archive lives in a cloud folder with "online-only" files (OneDrive Files On-Demand, iCloud Drive "Optimize Storage", Dropbox online-only), you can index the whole library without keeping it all on disk.
+
+**How online-only indexing works.** The indexer detects new or changed files from each file's size and modification time, which it reads from the placeholder *without* downloading the file. Only images that are genuinely new or changed get materialised and embedded, so reindexing an unchanged library downloads nothing.
+
+**Folder-by-folder driver.** For a large library on a storage-constrained machine, `index_library.py` indexes one allow-listed folder at a time so you can free space between folders:
+
+```bash
+# Index specific top-level folders (smallest first validates fast)
+python3 index_library.py --config config.yml \
+  --only "2019 Trip" --only "2020 Trip" --no-evict
+
+# Or drive it from an allow-list file (one folder name per line)
+cp folders.allow.example.txt folders.allow.txt   # then edit
+python3 index_library.py --config config.yml --folders folders.allow.txt
+```
+
+- `--only NAME` (repeatable) or `--folders FILE`: which top-level folders to index
+- `--max-gb N`: warn before indexing a folder larger than N GB (default 50)
+- `--no-evict`: don't prompt to free space between folders (use for unattended runs)
+
+After a folder is indexed, its thumbnails and embeddings are stored locally, so you can safely return the originals to online-only ("Free Up Space") and reclaim the disk. Only image files are ever read, so videos and other large files in the same tree are never downloaded.
+
+**Exact, training-free search index.** The FAISS index uses `IndexFlatL2` (exact nearest-neighbour) for libraries up to ~200k images. It needs no training step and searches tens of thousands of images in a few milliseconds.
+
+## Keeping the Index Current Automatically
+
+`reindex_missing.py` embeds only new or changed images (using the size/mtime detection above) and rebuilds the search index:
+
+```bash
+python3 reindex_missing.py
+```
+
+To run it on a schedule, `auto_reindex.sh` wraps it with logging, and the bundled launchd agent runs it for you. `com.himalayantrust.photo-reindex.plist` is set to run weekly - edit its `StartCalendarInterval` for a different cadence:
+
+```bash
+cp com.himalayantrust.photo-reindex.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.himalayantrust.photo-reindex.plist
+```
+
+Incremental runs download and embed newly added photos and leave them local until you next free space. For a large new drop (tens of GB), use the attended `index_library.py` so eviction keeps peak disk in check.
 
 ## MCP Tools
 
