@@ -10,6 +10,8 @@ import aiosqlite
 import exifread
 from PIL import Image
 
+from .sources import classify_source
+
 
 @dataclass
 class ImageMetadata:
@@ -37,6 +39,18 @@ class ImageMetadata:
     file_modified: Optional[str] = None
     file_created: Optional[str] = None
     indexed_at: Optional[str] = None
+    long_edge_px: Optional[int] = None
+    aesthetic_score: Optional[float] = None
+    source_class: Optional[str] = None
+
+
+# Columns added after the original schema. init_database adds any that an
+# existing database is missing, so older data dirs upgrade in place.
+ADDED_COLUMNS = {
+    "long_edge_px": "INTEGER",
+    "aesthetic_score": "REAL",
+    "source_class": "TEXT",
+}
 
 
 # Database schema
@@ -64,7 +78,10 @@ CREATE TABLE IF NOT EXISTS images (
     file_modified TEXT,
     file_created TEXT,
     indexed_at TEXT,
-    embedding_vector BLOB
+    embedding_vector BLOB,
+    long_edge_px INTEGER,
+    aesthetic_score REAL,
+    source_class TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_date_taken ON images(date_taken);
@@ -106,6 +123,16 @@ async def init_database(db_path: Path) -> None:
 
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA)
+        await db.commit()
+
+        cursor = await db.execute("PRAGMA table_info(images)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        for column, col_type in ADDED_COLUMNS.items():
+            if column not in existing:
+                await db.execute(f"ALTER TABLE images ADD COLUMN {column} {col_type}")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_aesthetic_score ON images(aesthetic_score)"
+        )
         await db.commit()
 
         # Store schema version
@@ -308,6 +335,7 @@ def extract_metadata(image_path: Path, archive_root: Path) -> ImageMetadata:
     try:
         with Image.open(image_path) as img:
             metadata.width, metadata.height = img.size
+            metadata.long_edge_px = max(img.size) or None
             metadata.orientation = img.getexif().get(0x0112, 1) if hasattr(img, "getexif") else 1
     except Exception:
         # If PIL fails, we'll still have basic metadata
@@ -352,6 +380,7 @@ def extract_metadata(image_path: Path, archive_root: Path) -> ImageMetadata:
         # EXIF extraction failed, continue with basic metadata
         pass
 
+    metadata.source_class = classify_source(metadata.folder, metadata.camera_model)
     return metadata
 
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Iterator
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def get_optimal_device(device_preference: str = "auto") -> torch.device:
@@ -46,6 +46,12 @@ def generate_thumbnail(
         Exception: If image cannot be processed
     """
     with Image.open(image_path) as img:
+        # Apply the EXIF orientation. Without this, ~2,400 library photos shot
+        # rotated got sideways or flipped thumbnails, which were then embedded
+        # and scored sideways too. The saved JPEG carries no EXIF, so the
+        # thumbnail itself must be upright.
+        img = ImageOps.exif_transpose(img)
+
         # Convert RGBA to RGB if necessary
         if img.mode in ("RGBA", "LA", "P"):
             # Create white background

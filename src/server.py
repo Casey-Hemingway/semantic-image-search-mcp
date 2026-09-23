@@ -55,6 +55,13 @@ async def search_images(
     date_from: str = None,
     date_to: str = None,
     folder_pattern: str = None,
+    min_quality: float = None,
+    min_long_edge: int = None,
+    quality_weight: float = 0.0,
+    dedupe: bool = True,
+    sources: list[str] = None,
+    archive: str = "auto",
+    taste_weight: float = 1.0,
 ) -> dict:
     """Search images using natural language queries with optional filters.
 
@@ -70,13 +77,34 @@ async def search_images(
         date_from: Filter results to images taken on or after this date (ISO format: YYYY-MM-DD)
         date_to: Filter results to images taken on or before this date (ISO format: YYYY-MM-DD)
         folder_pattern: Filter by folder path pattern (e.g., "2024" or "vacation")
+        min_quality: Only return photos whose aesthetic score (roughly 1-10) is at
+               least this. Around 5 drops the weakest photos; 5.5 and up keeps
+               the stronger third or so. Unscored photos are excluded.
+        min_long_edge: Only return photos whose original is at least this many
+               pixels on its long edge (e.g. 1080 for social, 2000 for print).
+        quality_weight: 0 (default) ranks purely by how well the photo matches
+               the query. 1.0 lets quality reorder close matches; higher values
+               favour quality more strongly.
+        dedupe: True (default) collapses copies of the same photo (re-exports,
+               rescans) into one result; the others are listed in duplicate_ids.
+        sources: Only return these source classes: "pro" (Blair Millar, Sam
+               Tarling, Alex Hillary, pro cameras, recent iPhones), "archive"
+               (historical film scans), "amateur" (compacts, older phones),
+               "unknown". By default all are searched, amateur photos rank
+               below pro ones of the same subject, and archive scans are
+               capped at 2 per page unless the query is historical.
+        archive: "auto" (default), "include", "exclude" or "only".
+        taste_weight: How strongly the Trust's learned photo taste (trained on
+               Casey's picks) reorders close matches. 1.0 default (gentle),
+               0 = pure relevance, 3 = strongly favour the best-looking photos.
 
     Returns:
         Dictionary containing:
         - success: Whether the search succeeded
         - query: The search query used
         - count: Number of results found
-        - results: List of matching images with metadata and similarity scores
+        - results: List of matching images with metadata, similarity,
+          aesthetic_score, long_edge_px and rank_score
     """
     try:
         _ensure_initialized()
@@ -87,6 +115,13 @@ async def search_images(
             date_from=date_from,
             date_to=date_to,
             folder_pattern=folder_pattern,
+            min_quality=min_quality,
+            min_long_edge=min_long_edge,
+            quality_weight=quality_weight or 0.0,
+            dedupe=dedupe,
+            sources=sources,
+            archive=archive or "auto",
+            taste_weight=1.0 if taste_weight is None else taste_weight,
         )
 
         return {

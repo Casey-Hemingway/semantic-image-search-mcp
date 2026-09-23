@@ -13,6 +13,7 @@ from transformers import CLIPProcessor, CLIPModel
 from tqdm import tqdm
 
 from .config import Config
+from .quality import AestheticScorer
 from .metadata import (
     extract_metadata,
     store_image_metadata,
@@ -113,6 +114,11 @@ class ImageIndexer:
         """
         self.config = config
         self.embedder: Optional[ClipEmbedder] = None
+        self.scorer: Optional[AestheticScorer] = None
+
+    def _ensure_scorer(self) -> None:
+        if self.scorer is None and self.config.quality.aesthetic_model_path:
+            self.scorer = AestheticScorer(Path(self.config.quality.aesthetic_model_path))
 
     async def index_archive(
         self,
@@ -142,6 +148,7 @@ class ImageIndexer:
             self.embedder = ClipEmbedder(
                 self.config.clip.model_name, self.config.clip.device
             )
+        self._ensure_scorer()
 
         # Initialize database
         await init_database(self.config.db_path)
@@ -286,6 +293,9 @@ class ImageIndexer:
 
         # Generate embeddings
         embeddings = self.embedder.embed_images(valid_paths)
+        if self.scorer is not None:
+            for metadata, score in zip(metadata_list, self.scorer.score(embeddings)):
+                metadata.aesthetic_score = float(score)
 
         # Generate thumbnails and store in database
         async with aiosqlite.connect(self.config.db_path) as db:
@@ -334,7 +344,8 @@ class ImageIndexer:
             print("Warning: No embeddings found in database")
             return
 
-        # Convert to numpy array
+        # Convert to numpy array. The searcher maps FAISS positions back to
+        # image_ids with the same query, so both must select identical rows.
         embeddings = np.array(
             [np.frombuffer(row[1], dtype=np.float32) for row in rows]
         )

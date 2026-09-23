@@ -34,6 +34,15 @@ class ThumbnailConfig:
 
 
 @dataclass
+class QualityConfig:
+    """Configuration for the per-photo aesthetic quality score."""
+
+    # Path to the LAION aesthetic predictor weights. Only valid with a
+    # ViT-L/14 CLIP model. Unset means no score is computed.
+    aesthetic_model_path: Optional[str] = None
+
+
+@dataclass
 class Config:
     """Main configuration for the semantic image search system."""
 
@@ -42,6 +51,7 @@ class Config:
     clip: ClipConfig = field(default_factory=ClipConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     thumbnails: ThumbnailConfig = field(default_factory=ThumbnailConfig)
+    quality: QualityConfig = field(default_factory=QualityConfig)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Config":
@@ -82,6 +92,7 @@ class Config:
         clip_config = ClipConfig(**data.get("clip", {}))
         search_config = SearchConfig(**data.get("search", {}))
         thumbnail_config = ThumbnailConfig(**data.get("thumbnails", {}))
+        quality_config = QualityConfig(**data.get("quality", {}))
 
         return cls(
             archive_path=archive_path,
@@ -89,6 +100,7 @@ class Config:
             clip=clip_config,
             search=search_config,
             thumbnails=thumbnail_config,
+            quality=quality_config,
         )
 
     @property

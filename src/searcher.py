@@ -1,5 +1,6 @@
 """Semantic image search with CLIP and FAISS."""
 
+import re
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -8,6 +9,7 @@ import aiosqlite
 
 from .config import Config
 from .indexer import ClipEmbedder
+from .sources import SOURCE_CLASSES
 
 
 class ImageSearcher:
@@ -32,6 +34,13 @@ class ImageSearcher:
         date_to: Optional[str] = None,
         folder_pattern: Optional[str] = None,
         tags: Optional[list[str]] = None,
+        min_quality: Optional[float] = None,
+        min_long_edge: Optional[int] = None,
+        quality_weight: float = 0.0,
+        dedupe: bool = True,
+        sources: Optional[list[str]] = None,
+        archive: str = "auto",
+        taste_weight: float = 1.0,
     ) -> list[dict]:
         """Search images using natural language query with filters.
 
@@ -42,6 +51,20 @@ class ImageSearcher:
             date_to: Filter by date taken (ISO format)
             folder_pattern: Filter by folder path pattern
             tags: Filter by tags
+            min_quality: Drop images whose aesthetic score is below this
+            min_long_edge: Drop images whose original's long edge is below this (px)
+            quality_weight: 0 ranks by similarity alone. Above 0, blends in the
+                aesthetic score (see _rank_score)
+            dedupe: Collapse copies of the same photo (re-exports, rescans,
+                re-crops) into one result, listing the others in duplicate_ids
+            sources: Only return these source classes (pro, archive, amateur,
+                unknown). None applies the default source ranking instead.
+            archive: "auto" (archive film scans rank freely for historical
+                queries, otherwise at most ARCHIVE_CAP per page), "include"
+                (rank freely), "exclude", or "only"
+
+            taste_weight: How much the learned HT taste score reorders close
+                matches. 1.0 (default) is gentle; 0 ranks by relevance alone.
 
         Returns:
             List of matching images with metadata and similarity scores
@@ -57,8 +80,14 @@ class ImageSearcher:
         query_embedding = self.embedder.embed_text(query)
 
         # Search FAISS index
-        # Over-fetch to allow for filtering
-        k = min(limit * 10, len(self.image_id_mapping))
+        # Over-fetch to allow for filtering. Quality filters and re-ranking can
+        # discard most of the nearest neighbours, so fetch much deeper for them.
+        # An exact flat index over ~26k vectors makes this cheap.
+        depth = 10
+        if (min_quality is not None or min_long_edge is not None or quality_weight > 0
+                or sources or archive in ("only", "exclude")):
+            depth = 50
+        k = min(limit * depth, len(self.image_id_mapping))
         if k == 0:
             return []
 
@@ -66,16 +95,32 @@ class ImageSearcher:
             query_embedding.reshape(1, -1).astype(np.float32), k
         )
 
-        # Convert L2 distances to similarity scores
-        # For normalized vectors: similarity = 1 - (L2_distance^2 / 2)
-        similarities = 1 - (distances[0] ** 2 / 2)
+        # Convert L2 distances to cosine similarity. IndexFlatL2 returns SQUARED
+        # L2 distances, so for normalised vectors cosine = 1 - d / 2. (This used
+        # to square d again. Ranking was unaffected, since the map is monotonic,
+        # but reported scores were wrong, and with ViT-L/14's lower cosines they
+        # went negative and similarity_threshold 0.0 silently dropped results.)
+        similarities = 1 - distances[0] / 2
 
         # Get candidate image IDs
         candidate_ids = [self.image_id_mapping[i] for i in indices[0]]
 
         # Apply filters and fetch metadata
         results = await self._filter_and_fetch(
-            candidate_ids, similarities, date_from, date_to, folder_pattern, tags, limit
+            candidate_ids,
+            similarities,
+            date_from,
+            date_to,
+            folder_pattern,
+            tags,
+            limit,
+            min_quality=min_quality,
+            min_long_edge=min_long_edge,
+            quality_weight=quality_weight,
+            dedupe=dedupe,
+            sources=sources,
+            archive_mode=_archive_mode(archive, query),
+            taste_weight=taste_weight,
         )
 
         return results
@@ -225,7 +270,11 @@ class ImageSearcher:
 
             # Load image ID mapping (must match order in FAISS index)
             async with aiosqlite.connect(self.config.db_path) as db:
-                cursor = await db.execute("SELECT image_id FROM images ORDER BY image_id")
+                # Must select exactly the rows _rebuild_faiss_index embedded, in
+                # the same order, or FAISS positions map to the wrong image.
+                cursor = await db.execute(
+                    "SELECT image_id FROM images WHERE embedding_vector IS NOT NULL ORDER BY image_id"
+                )
                 rows = await cursor.fetchall()
                 self.image_id_mapping = [row[0] for row in rows]
 
@@ -240,6 +289,13 @@ class ImageSearcher:
         folder_pattern: Optional[str],
         tags: Optional[list[str]],
         limit: int,
+        min_quality: Optional[float] = None,
+        min_long_edge: Optional[int] = None,
+        quality_weight: float = 0.0,
+        dedupe: bool = True,
+        sources: Optional[list[str]] = None,
+        archive_mode: str = "capped",
+        taste_weight: float = 1.0,
     ) -> list[dict]:
         """Apply filters and fetch full metadata.
 
@@ -274,6 +330,24 @@ class ImageSearcher:
             conditions.append("folder LIKE ?")
             params.append(f"%{folder_pattern}%")
 
+        allowed = list(sources) if sources else None
+        if archive_mode == "only":
+            allowed = ["archive"]
+        elif archive_mode == "exclude":
+            allowed = [c for c in (allowed or SOURCE_CLASSES) if c != "archive"]
+        if allowed:
+            conditions.append(f"source_class IN ({','.join('?' * len(allowed))})")
+            params.extend(allowed)
+
+        # Unscored or unmeasured images fail a quality floor rather than pass it.
+        if min_quality is not None:
+            conditions.append("aesthetic_score >= ?")
+            params.append(min_quality)
+
+        if min_long_edge is not None:
+            conditions.append("long_edge_px >= ?")
+            params.append(min_long_edge)
+
         if conditions:
             query += " AND " + " AND ".join(conditions)
 
@@ -300,6 +374,18 @@ class ImageSearcher:
                 query += " AND i.folder LIKE ?"
                 params.append(f"%{folder_pattern}%")
 
+            if allowed:
+                query += f" AND i.source_class IN ({','.join('?' * len(allowed))})"
+                params.extend(allowed)
+
+            if min_quality is not None:
+                query += " AND i.aesthetic_score >= ?"
+                params.append(min_quality)
+
+            if min_long_edge is not None:
+                query += " AND i.long_edge_px >= ?"
+                params.append(min_long_edge)
+
         # Fetch results
         async with aiosqlite.connect(self.config.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -309,6 +395,7 @@ class ImageSearcher:
         # Match with similarity scores
         id_to_similarity = dict(zip(candidate_ids, similarities))
         results = []
+        vectors = {}
 
         for row in rows:
             image_id = row["image_id"]
@@ -328,7 +415,27 @@ class ImageSearcher:
                 "camera_model": row["camera_model"],
                 "width": row["width"],
                 "height": row["height"],
+                # Older data dirs predate these columns; keep them searchable so
+                # rolling back to one never breaks the server.
+                "long_edge_px": row["long_edge_px"] if "long_edge_px" in row.keys() else None,
+                "aesthetic_score": None,
             }
+            aesthetic = row["aesthetic_score"] if "aesthetic_score" in row.keys() else None
+            if aesthetic is not None:
+                result["aesthetic_score"] = round(aesthetic, 2)
+            source = row["source_class"] if "source_class" in row.keys() else None
+            result["source_class"] = source
+            prior = 0.0 if sources else SOURCE_PRIOR.get(source, 0.0)
+            if source == "archive" and archive_mode in ("include", "only"):
+                prior = 0.0
+            taste = row["taste_score"] if "taste_score" in row.keys() else None
+            result["taste_score"] = round(taste, 2) if taste is not None else None
+            taste_term = TASTE_SCALE * taste_weight * taste if taste is not None else 0.0
+            result["rank_score"] = (
+                _rank_score(similarity, aesthetic, quality_weight) + prior + taste_term
+            )
+            if row["embedding_vector"] is not None:
+                vectors[image_id] = np.frombuffer(row["embedding_vector"], dtype=np.float32)
 
             # Add thumbnail path if available
             if self.config.thumbnails.enabled:
@@ -338,6 +445,105 @@ class ImageSearcher:
 
             results.append(result)
 
-        # Sort by similarity (descending) and limit
-        results.sort(key=lambda x: x["similarity"], reverse=True)
+        # Sort by rank (similarity alone when quality_weight is 0) and limit
+        results.sort(key=lambda x: x["rank_score"], reverse=True)
+        if dedupe:
+            results = _collapse_duplicates(results, vectors, len(results))
+        if archive_mode == "capped" and not sources:
+            results = _cap_archive(results, ARCHIVE_CAP)
         return results[:limit]
+
+
+# PLACEHOLDERS, not calibrated: the LAION score tracked Casey's labels at only
+# rho 0.14 (23 Sep 2026), so quality_weight defaults to 0 until a better score exists.
+QUALITY_CENTRE = 5.0
+QUALITY_SCALE = 0.02
+
+
+def _rank_score(
+    similarity: float, aesthetic_score: Optional[float], quality_weight: float
+) -> float:
+    """Blend CLIP similarity with the aesthetic score.
+
+    CLIP text-image similarities for good matches sit in a narrow band (roughly
+    0.2 to 0.35), while aesthetic scores run about 1 to 10. Each aesthetic point
+    above QUALITY_CENTRE is worth QUALITY_SCALE of similarity at weight 1.0, so
+    quality reorders close matches without dragging in off-topic photos.
+    Unscored images are treated as exactly average.
+    """
+    if quality_weight <= 0 or aesthetic_score is None:
+        return similarity
+    return similarity + quality_weight * QUALITY_SCALE * (aesthetic_score - QUALITY_CENTRE)
+
+
+# Cosine at or above which two library photos are treated as the same picture.
+# Measured on ViT-L/14, 23 Sep 2026: byte-identical copies score 1.000 and
+# rescans or re-exports 0.996-0.998, while the closest DIFFERENT photos in the
+# test queries (same classroom, same peak) topped out around 0.92.
+DUPLICATE_COSINE = 0.97
+
+
+def _collapse_duplicates(results: list[dict], vectors: dict, limit: int) -> list[dict]:
+    """Keep the best-ranked copy of each photo; note the others on it."""
+    kept: list[dict] = []
+    kept_vecs: list[np.ndarray] = []
+    for r in results:
+        v = vectors.get(r["image_id"])
+        if v is not None and kept_vecs:
+            sims = np.array(kept_vecs) @ v
+            j = int(sims.argmax())
+            if sims[j] >= DUPLICATE_COSINE:
+                twin = kept[[i for i, k in enumerate(kept) if k["_has_vec"]][j]]
+                twin.setdefault("duplicate_ids", []).append(r["image_id"])
+                continue
+        r["_has_vec"] = v is not None
+        kept.append(r)
+        if v is not None:
+            kept_vecs.append(v)
+        if len(kept) >= limit:
+            break
+    for r in kept:
+        r.pop("_has_vec", None)
+    return kept
+
+
+# Default source ranking, in cosine-similarity units. Top matches for a query
+# typically sit within about 0.01-0.03 of each other, so a pro photo of the
+# same subject outranks an amateur one, while an amateur photo that is the only
+# good match for a query still appears. Set from Casey's sourcing hierarchy,
+# 23 Sep 2026 (see src/sources.py).
+SOURCE_PRIOR = {"pro": 0.0, "unknown": -0.01, "archive": -0.01, "amateur": -0.03}
+
+# Learned HT taste score (train_taste.py; z-scored across the library). One
+# standard deviation is worth this much cosine similarity at taste_weight 1.0:
+# enough to reorder close matches, never enough to lift an off-topic photo.
+# Trained on Casey's round-2 pairwise picks, 23 Sep 2026: held-out rho 0.51
+# on his 30 tier labels (LAION: 0.14).
+TASTE_SCALE = 0.005
+
+# Archive film scans are "magical when used sparingly": outside historical
+# queries, at most this many per results page.
+ARCHIVE_CAP = 2
+
+_HISTORICAL = re.compile(
+    r"\b(hillary|sir ed|expedition|historic|history|archive|archival|vintage|old photo|"
+    r"founding|founder|195\d|196\d|197\d|1950s|1960s|1970s|1980s|black and white|b&w)\b",
+    re.IGNORECASE,
+)
+
+
+def _archive_mode(archive: str, query: str) -> str:
+    if archive in ("include", "exclude", "only"):
+        return archive
+    return "include" if _HISTORICAL.search(query or "") else "capped"
+
+
+def _cap_archive(results: list[dict], cap: int) -> list[dict]:
+    kept, seen = [], 0
+    for r in results:
+        if r.get("source_class") == "archive":
+            if seen >= cap:
+                continue
+            seen += 1
+        kept.append(r)
+    return kept

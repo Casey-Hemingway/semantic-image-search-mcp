@@ -17,6 +17,13 @@ set -euo pipefail
 # aborts with "OMP: Error #15" unless we allow the duplicate. Harmless here.
 export KMP_DUPLICATE_LIB_OK=TRUE
 
+# Load the CLIP model from the local HuggingFace cache only. Without this,
+# transformers calls huggingface.co on every run to check for updates, and a
+# network timeout there killed the 13 Sep 2026 run and every run after it.
+# The model is already cached; nothing here needs the network except OneDrive.
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
 REPO="/Users/casey-hemingway/Code/HimalayanTrust/semantic-image-search-mcp"
 cd "$REPO"
 mkdir -p "$REPO/logs"
