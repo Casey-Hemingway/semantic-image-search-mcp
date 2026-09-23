@@ -425,6 +425,7 @@ class ImageSearcher:
                 result["aesthetic_score"] = round(aesthetic, 2)
             source = row["source_class"] if "source_class" in row.keys() else None
             result["source_class"] = source
+            result["rotation_fix"] = row["rotation_fix"] if "rotation_fix" in row.keys() else None
             prior = 0.0 if sources else SOURCE_PRIOR.get(source, 0.0)
             if source == "archive" and archive_mode in ("include", "only"):
                 prior = 0.0
